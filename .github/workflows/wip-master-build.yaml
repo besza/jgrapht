@@ -1,0 +1,69 @@
+name: Modular build steps
+on:
+  push:
+    branches-ignore:
+      - 'master'
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v1
+        with:
+          java-version: 11
+      - name: Cache Maven packages
+        uses: actions/cache@v2
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+      - name: Build with Maven
+        run: |
+          set -e
+          mvn -V -B install -DskipTests=true -Dmaven.javadoc.skip=true && mvn checkstyle:check -P checkstyle && mvn -B verify
+  pages:
+    runs-on: ubuntu-20.04
+    needs: [ build ]
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v1
+        with:
+          java-version: 11
+      - uses: actions/setup-node@v2
+        with:
+          node-version: 14
+      - run: npm install -g hercule@5.0.0
+      - run: |
+          set -e
+          mvn javadoc:aggregate
+      - name: Run prepareDocs script
+        run: ./etc/prepareDocs.sh
+        shell: bash
+      - name: Publish Github Pages
+        uses: JamesIves/github-pages-deploy-action@3.7.1
+        with:
+          ACCESS_TOKEN: ${{ secrets.PAGES_TOKEN }}
+          BRANCH: gh-pages
+          FOLDER: docs
+          CLEAN: true
+  sonatype:
+    runs-on: ubuntu-20.04
+    needs: [ build ]
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v1
+        with:
+          java-version: 11
+      - name: Deploy snapshot to Sonatype
+        env:
+          SONATYPE_USER: ${{ secrets.CI_DEPLOY_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.CI_DEPLOY_PASSWORD }}
+        run: mvn deploy -DskipTests=true --settings etc/snapshot-settings.xml
+        shell: bash
